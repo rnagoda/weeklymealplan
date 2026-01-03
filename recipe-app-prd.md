@@ -29,7 +29,11 @@ A unified platform that connects the full cooking workflow: **Collect → Plan �
 ### 1.4 Key Differentiators
 
 1. **Flexible meal planning** — No rigid breakfast/lunch/dinner slots; works for any eating pattern (OMAD, intermittent fasting, traditional, etc.)
-2. **Tiered sharing model** — Private recipes, friend-only recipes, follower-visible recipes, and fully public recipes
+2. **Tiered visibility model** — Four visibility levels that expand access progressively:
+   - **Private** — Only visible to you
+   - **Friends** — Visible to mutual friends (and you)
+   - **Followers** — Visible to anyone following you, plus friends (and you)
+   - **Public** — Visible to everyone, including anonymous users
 3. **Collaborative grocery lists** — Share lists with household members; changes sync in real-time
 4. **Recipe forking with attribution** — Save and modify others' recipes while preserving credit to the original
 
@@ -167,6 +171,7 @@ A unified platform that connects the full cooking workflow: **Collect → Plan �
 - [ ] If no photo uploaded, user can select from 6-8 default placeholder images (food-themed illustrations)
 - [ ] Recipes without a photo or selected placeholder display a generic default image
 - [ ] Visibility defaults to "private"
+- [ ] Visibility options clearly labeled: "Only me" (private), "Friends" (friends), "Followers" (followers), "Everyone" (public)
 - [ ] Search matches partial title text (case-insensitive)
 - [ ] Deleting a recipe prompts for confirmation
 
@@ -193,10 +198,11 @@ A unified platform that connects the full cooking workflow: **Collect → Plan �
 
 #### Acceptance Criteria
 
-- [ ] Public recipes visible to all users (including anonymous)
-- [ ] Follower-visible recipes shown to users who follow the owner + friends
-- [ ] Friend-visible recipes shown only to mutual friends of the owner
-- [ ] Private recipes visible only to the owner
+- [ ] **Public** recipes visible to all users (including anonymous)
+- [ ] **Followers** recipes visible to: followers of the owner + mutual friends of the owner
+- [ ] **Friends** recipes visible to: mutual friends of the owner only
+- [ ] **Private** recipes visible only to the owner
+- [ ] Visibility is hierarchical: friends can see friends + followers + public; followers can see followers + public
 - [ ] Direct sharing creates a notification for the recipient
 - [ ] Direct shares include optional note from sender
 - [ ] "Shared with me" section shows all directly received recipes
@@ -379,22 +385,24 @@ App
     │   └── List Detail (with shopping mode)
     │
     └── Profile (current user)
-        ├── Profile settings
-        ├── Friends list
-        ├── Followers/Following
-        ├── Shared with me
-        └── Notifications
+        ├── Profile display & edit
+        └── Modal screens (triggered from profile):
+            ├── Friends (manage friends & requests)
+            ├── Followers/Following
+            ├── Shared with me
+            ├── Notifications
+            └── Settings (preferences)
 ```
 
 ### 4.2 Screen Inventory
 
-| Screen | Path | Auth Required | Description |
-|--------|------|---------------|-------------|
+| Screen | Path / Component | Auth Required | Description |
+|--------|------------------|---------------|-------------|
 | Landing | `/` | No | Public recipes + signin prompt |
 | Login | `/login` | No | Email/password and Google signin |
 | Sign Up | `/signup` | No | Account creation |
 | Forgot Password | `/forgot-password` | No | Password reset request |
-| My Recipes | `/recipes` | Yes | User's recipe collection |
+| My Recipes | `/recipes` (tabs/index) | Yes | User's recipe collection |
 | Create Recipe | `/recipe/create` | Yes | Recipe creation form |
 | Recipe Detail | `/recipe/[id]` | Varies* | View single recipe |
 | Edit Recipe | `/recipe/edit/[id]` | Yes (owner) | Edit recipe form |
@@ -405,11 +413,13 @@ App
 | Grocery Lists | `/grocery` | Yes | All lists overview |
 | Grocery List Detail | `/grocery/[id]` | Yes (owner/collaborator) | Single list with items |
 | My Profile | `/profile` | Yes | Current user's profile & settings |
-| Friends | `/profile/friends` | Yes | Friends list management |
-| Notifications | `/profile/notifications` | Yes | Notification center |
-| Shared With Me | `/profile/shared` | Yes | Recipes shared directly with user |
+| Friends | `FriendsModal` | Yes | Friends list management (modal) |
+| Followers/Following | `FollowersModal` | Yes | Followers/following lists (modal) |
+| Notifications | `NotificationsModal` | Yes | Notification center (modal) |
+| Shared With Me | `SharedWithMeModal` | Yes | Recipes shared directly with user (modal) |
+| Settings | `SettingsModal` | Yes | App preferences (modal) |
 
-*Recipe visibility determines auth requirements  
+*Recipe visibility determines auth requirements
 **Anonymous can browse; signin required to follow, save, or interact
 
 ---
@@ -510,12 +520,15 @@ The following features have been discussed but are **not** included in MVP:
 | Recipe images | **Optional**; provide ~6-8 default placeholder images user can select if they don't upload their own |
 | Username changes | **Not allowed in MVP**; username is permanent after signup (simplifies attribution and URLs) |
 
-### Remaining Open Questions
+### Resolved Design Decisions
 
-| Question | Context | Decision Needed By |
-|----------|---------|-------------------|
-| Notification preferences? | Let users disable certain notification types? | Before notifications implementation |
-| Data export format? | JSON? Recipe-specific format (e.g., Recipe Schema)? | Before launch (GDPR) |
+| Question | Decision |
+|----------|----------|
+| Notification preferences | Simple on/off toggle per notification type (friend requests, friend accepted, recipe shared, list shared, new follower) plus master push toggle |
+| Data export format | JSON format for GDPR data export |
+| Profile sub-screens | Modal screens triggered from profile tab (not separate routes) |
+| User settings storage | Dedicated `user_settings` table (separate from profiles) |
+| Default placeholder images | Will be generated during implementation (6-8 food-themed illustrations) |
 
 ---
 

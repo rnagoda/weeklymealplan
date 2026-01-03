@@ -47,7 +47,12 @@ This plan breaks the MVP into 9 phases, ordered to minimize rework and ensure ea
 
 #### 0.1 Supabase Project Setup
 - [ ] Create Supabase project
-- [ ] Run database schema SQL (from architecture doc)
+- [ ] Run database schema SQL (from architecture doc), which includes:
+  - All tables (profiles, user_settings, follows, friendships, recipes, etc.)
+  - Indexes and constraints
+  - RLS policies
+  - Triggers (user creation, updated_at, notification creation)
+  - Helper functions (are_friends, is_following, can_view_recipe, should_notify)
 - [ ] Verify tables, indexes, and RLS policies created
 - [ ] Configure auth providers (Email, Google OAuth)
 - [ ] Create storage buckets (recipe-images, avatars)
@@ -172,10 +177,20 @@ This plan breaks the MVP into 9 phases, ordered to minimize rework and ensure ea
 - [ ] Create lib/storage.ts with avatar upload helper
 
 #### 1.6 User Settings
-- [ ] Add settings section to profile
-- [ ] Implement "First day of week" setting (Sunday/Monday)
-- [ ] Store setting in user profile or separate settings table
-- [ ] Persist setting and reflect in UI
+- [ ] Create hooks/useSettings.ts
+  - useSettings() - fetch current user settings
+  - useUpdateSettings() - mutation
+- [ ] Create components/profile/SettingsModal.tsx
+  - First day of week selector (Sunday through Saturday)
+  - Notification preferences (on/off per type):
+    - Friend requests
+    - Friend request accepted
+    - Recipe shared
+    - List shared
+    - New follower
+  - Push notifications master toggle
+- [ ] User settings table already created via schema (auto-created on signup)
+- [ ] Persist settings and reflect in UI
 
 ### Definition of Done
 - [ ] New users can sign up with email/password
@@ -184,7 +199,8 @@ This plan breaks the MVP into 9 phases, ordered to minimize rework and ensure ea
 - [ ] Password reset email sends and works
 - [ ] Username uniqueness enforced
 - [ ] Users can edit display name, bio, avatar
-- [ ] Users can configure first day of week
+- [ ] Users can configure first day of week in settings modal
+- [ ] Users can toggle notification preferences per type
 - [ ] Sign out clears session and redirects to login
 - [ ] Protected routes redirect to login when unauthenticated
 - [ ] Auth persists across app restarts
@@ -350,21 +366,21 @@ This plan breaks the MVP into 9 phases, ordered to minimize rework and ensure ea
   - Add Friend / Remove Friend button
   - List of their visible recipes (based on relationship)
 
-#### 3.5 Friends Management Screen
-- [ ] Create app/(tabs)/profile/friends.tsx (or modal)
+#### 3.5 Friends Management Modal
+- [ ] Create components/profile/FriendsModal.tsx
   - Tab or segment: Friends / Requests / Find
   - Friends list with remove option
   - Incoming requests with accept/decline
   - Sent requests with cancel option
   - Search/find users section
+- [ ] Trigger modal from profile screen
 
-#### 3.6 Following/Followers Lists
-- [ ] Create app/(tabs)/profile/following.tsx
-  - List of users I follow
-  - Unfollow button per user
-- [ ] Create app/(tabs)/profile/followers.tsx
-  - List of users following me
-  - Follow back button (if not following)
+#### 3.6 Following/Followers Modal
+- [ ] Create components/profile/FollowersModal.tsx
+  - Tab or segment: Followers / Following
+  - Followers tab: list of users following me, follow back button
+  - Following tab: list of users I follow, unfollow button
+- [ ] Trigger modal from profile screen
 
 #### 3.7 Relationship Helpers
 - [ ] Create utils/relationships.ts
@@ -421,13 +437,14 @@ This plan breaks the MVP into 9 phases, ordered to minimize rework and ensure ea
   - useShareRecipe() - mutation
 - [ ] Add share button to recipe detail screen
 
-#### 4.4 Shared With Me
-- [ ] Create app/(tabs)/profile/shared.tsx
+#### 4.4 Shared With Me Modal
+- [ ] Create components/profile/SharedWithMeModal.tsx
   - List of recipes shared directly with user
   - Shows sender, note, date
-  - Tap to view recipe
+  - Tap to view recipe (closes modal, navigates to recipe)
 - [ ] Create hooks/useSharedRecipes.ts
   - useSharedWithMe() - recipes others shared with me
+- [ ] Trigger modal from profile screen
 
 #### 4.5 Recipe Forking
 - [ ] Add "Save to My Recipes" button on other users' recipes
@@ -729,24 +746,27 @@ This plan breaks the MVP into 9 phases, ordered to minimize rework and ensure ea
   - useMarkAllAsRead() - mutation
 
 #### 8.2 Database Triggers
-- [ ] Create trigger: on friend request → insert notification
-- [ ] Create trigger: on friend accept → insert notification
-- [ ] Create trigger: on recipe share → insert notification
-- [ ] Create trigger: on list share → insert notification
-- [ ] Create trigger: on new follower → insert notification
-- [ ] Verify triggers work correctly
+- [ ] Notification triggers already defined in schema (via architecture doc):
+  - on_friend_request_created → creates notification for addressee
+  - on_friend_request_accepted → creates notification for requester
+  - on_recipe_shared → creates notification for recipient
+  - on_list_collaborator_added → creates notification for collaborator
+  - on_new_follower → creates notification for followee
+- [ ] Triggers respect user notification preferences (should_notify function)
+- [ ] Verify triggers work correctly with test data
 
-#### 8.3 Notifications Screen
-- [ ] Create app/(tabs)/profile/notifications.tsx
+#### 8.3 Notifications Modal
+- [ ] Create components/profile/NotificationsModal.tsx
   - List of notifications (newest first)
   - Unread indicator per notification
-  - Tap to navigate to relevant content
+  - Tap to navigate to relevant content (closes modal first)
   - Mark all as read button
 - [ ] Create components/notifications/NotificationItem.tsx
   - Icon based on type
   - Title and body text
   - Timestamp
   - Unread dot
+- [ ] Trigger modal from profile screen (notification bell icon)
 
 #### 8.4 Notification Badge
 - [ ] Add badge to notification bell icon
@@ -768,21 +788,21 @@ This plan breaks the MVP into 9 phases, ordered to minimize rework and ensure ea
 #### 8.7 Deep Linking
 - [ ] Configure deep link handling in Expo
 - [ ] Notification tap → navigate to relevant screen
-  - friend_request → friends screen
-  - friend_accepted → user profile
-  - recipe_shared → shared with me
-  - list_shared → grocery list
-  - new_follower → user profile
+  - friend_request → open friends modal
+  - friend_accepted → navigate to user profile
+  - recipe_shared → open shared with me modal or navigate to recipe
+  - list_shared → navigate to grocery list
+  - new_follower → navigate to user profile
 
 ### Definition of Done
-- [ ] Notifications created for all trigger events
-- [ ] Notifications display in-app with correct content
-- [ ] Unread badge shows accurate count
+- [ ] Notifications created for all trigger events (respecting user preferences)
+- [ ] Notifications display in notifications modal with correct content
+- [ ] Unread badge shows accurate count on notification bell
 - [ ] Tapping notification navigates to relevant content
 - [ ] Users can mark notifications as read
 - [ ] Push notifications received on iOS and Android
-- [ ] Push notification tap opens correct screen
-- [ ] Users can manage push permission
+- [ ] Push notification tap opens correct screen/modal
+- [ ] Users can manage push permission and per-type preferences in settings modal
 
 ---
 

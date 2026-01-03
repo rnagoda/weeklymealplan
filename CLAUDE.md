@@ -64,9 +64,14 @@ recipe-app/
 │   │   ├── grocery.tsx
 │   │   └── profile.tsx
 │   ├── recipe/
-│   │   ├── [id].tsx              # Dynamic route
+│   │   ├── [id].tsx              # Recipe detail (dynamic route)
 │   │   ├── create.tsx
-│   │   └── cook/[id].tsx
+│   │   ├── edit/[id].tsx         # Edit recipe
+│   │   └── cook/[id].tsx         # Cook mode
+│   ├── grocery/
+│   │   └── [id].tsx              # Grocery list detail
+│   ├── user/
+│   │   └── [username].tsx        # Public user profile
 │   └── _layout.tsx               # Root layout
 │
 ├── components/
@@ -80,12 +85,26 @@ recipe-app/
 │   │   ├── RecipeForm.tsx
 │   │   └── IngredientList.tsx
 │   ├── meal-plan/
-│   └── grocery/
+│   ├── grocery/
+│   ├── social/                   # Social feature components
+│   │   ├── UserCard.tsx
+│   │   ├── FriendsList.tsx
+│   │   └── ShareModal.tsx
+│   └── profile/                  # Profile modal screens
+│       ├── FriendsModal.tsx
+│       ├── FollowersModal.tsx
+│       ├── NotificationsModal.tsx
+│       ├── SharedWithMeModal.tsx
+│       └── SettingsModal.tsx
 │
 ├── hooks/                        # Custom hooks
 │   ├── useAuth.ts
 │   ├── useRecipes.ts
 │   ├── useMealPlan.ts
+│   ├── useGroceryLists.ts
+│   ├── useFriends.ts
+│   ├── useNotifications.ts
+│   ├── useSettings.ts
 │   └── useRealtimeSubscription.ts
 │
 ├── lib/                          # Core utilities and clients
@@ -518,6 +537,30 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
 ### 14. Git & Version Control
 
+**CRITICAL: Never commit directly to the `main` branch.** All work—including minor changes, bug fixes, and documentation updates—must be done on feature branches. When ready, create a pull request to merge into `main`.
+
+#### Branch Workflow
+
+1. **Create a feature branch** from `main` before starting any work:
+   ```bash
+   git checkout main
+   git pull origin main
+   git checkout -b feature/your-feature-name
+   ```
+
+2. **Branch naming conventions:**
+   - `feature/` — New features (e.g., `feature/recipe-sharing`)
+   - `fix/` — Bug fixes (e.g., `fix/ingredient-aggregation`)
+   - `refactor/` — Code refactoring (e.g., `refactor/grocery-hooks`)
+   - `docs/` — Documentation changes (e.g., `docs/api-reference`)
+   - `chore/` — Maintenance tasks (e.g., `chore/update-dependencies`)
+
+3. **Commit to your feature branch**, then create a PR to merge into `main`
+
+4. **Never push directly to `main`** — all changes go through pull requests
+
+#### Commit Messages
+
 - Write clear commit messages using conventional commits
 - Keep commits atomic and focused
 - Never commit `node_modules`, `.env`, or build artifacts
@@ -527,6 +570,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 feat: add recipe sharing to friends
 fix: resolve ingredient aggregation for fractional quantities
 refactor: extract grocery list hooks
+docs: update API reference for notifications
 ```
 
 ---

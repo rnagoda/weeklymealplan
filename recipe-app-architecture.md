@@ -119,23 +119,27 @@ This document outlines the technical architecture for a cross-platform recipe ma
                                     │ (Supabase Auth)  │
                                     └────────┬─────────┘
                                              │
-                          ┌──────────────────┼──────────────────┐
-                          │                  │                  │
-                          ▼                  ▼                  ▼
-                   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-                   │  profiles   │    │   follows   │    │ friendships │
-                   └──────┬──────┘    └─────────────┘    └─────────────┘
-                          │
-          ┌───────────────┼───────────────┬────────────────┐
-          │               │               │                │
-          ▼               ▼               ▼                ▼
-   ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌──────────────┐
-   │   recipes   │ │ meal_plan   │ │grocery_lists│ │notifications │
-   └──────┬──────┘ │  _entries   │ └──────┬──────┘ └──────────────┘
-          │        └─────────────┘        │
-    ┌─────┴─────┐                   ┌─────┴─────┐
-    │           │                   │           │
-    ▼           ▼                   ▼           ▼
+                   ┌─────────────────────────┼─────────────────────────┐
+                   │                         │                         │
+                   ▼                         ▼                         ▼
+            ┌─────────────┐           ┌─────────────┐           ┌─────────────┐
+            │  profiles   │           │user_settings│           │   follows   │
+            └──────┬──────┘           └─────────────┘           └─────────────┘
+                   │
+                   │                                            ┌─────────────┐
+                   │                                            │ friendships │
+                   │                                            └─────────────┘
+                   │
+   ┌───────────────┼───────────────┬────────────────┐
+   │               │               │                │
+   ▼               ▼               ▼                ▼
+┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌──────────────┐
+│   recipes   │ │ meal_plan   │ │grocery_lists│ │notifications │
+└──────┬──────┘ │  _entries   │ └──────┬──────┘ └──────────────┘
+       │        └─────────────┘        │
+ ┌─────┴─────┐                   ┌─────┴─────┐
+ │           │                   │           │
+ ▼           ▼                   ▼           ▼
 ┌────────┐ ┌────────────┐   ┌───────────┐ ┌───────────────┐
 │ingredients│ │instructions│ │grocery    │ │grocery_list   │
 └────────┘ └────────────┘   │  _items   │ │ _collaborators│
@@ -164,6 +168,16 @@ create type notification_type as enum (
   'new_follower'
 );
 
+create type day_of_week as enum (
+  'sunday',
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday'
+);
+
 -- ============================================
 -- PROFILES (extends Supabase auth.users)
 -- ============================================
@@ -185,6 +199,24 @@ create table profiles (
 -- Index for username search
 create index profiles_username_trgm_idx on profiles using gin (username gin_trgm_ops);
 create index profiles_display_name_trgm_idx on profiles using gin (display_name gin_trgm_ops);
+
+-- ============================================
+-- USER SETTINGS (app preferences)
+-- ============================================
+create table user_settings (
+  id uuid references auth.users on delete cascade primary key,
+  first_day_of_week day_of_week default 'sunday' not null,
+  -- Notification preferences (on/off per type)
+  notify_friend_requests boolean default true not null,
+  notify_friend_accepted boolean default true not null,
+  notify_recipe_shared boolean default true not null,
+  notify_list_shared boolean default true not null,
+  notify_new_follower boolean default true not null,
+  -- Push notification master toggle
+  push_notifications_enabled boolean default true not null,
+  created_at timestamptz default now() not null,
+  updated_at timestamptz default now() not null
+);
 
 -- ============================================
 -- FOLLOWS (one-way relationship)
@@ -447,16 +479,22 @@ $$ language plpgsql security definer stable;
 -- TRIGGERS
 -- ============================================
 
--- Auto-create profile when user signs up
+-- Auto-create profile and settings when user signs up
 create or replace function handle_new_user()
 returns trigger as $$
 begin
+  -- Create profile
   insert into profiles (id, username, display_name)
   values (
     new.id,
     new.raw_user_meta_data->>'username',
     coalesce(new.raw_user_meta_data->>'display_name', new.raw_user_meta_data->>'username')
   );
+
+  -- Create default settings
+  insert into user_settings (id)
+  values (new.id);
+
   return new;
 end;
 $$ language plpgsql security definer;
@@ -486,11 +524,185 @@ create trigger grocery_lists_updated_at before update on grocery_lists
 create trigger grocery_items_updated_at before update on grocery_items
   for each row execute function update_updated_at();
 
+create trigger user_settings_updated_at before update on user_settings
+  for each row execute function update_updated_at();
+
+-- ============================================
+-- NOTIFICATION CREATION TRIGGERS
+-- ============================================
+
+-- Helper function to check if user wants this notification type
+create or replace function should_notify(user_id uuid, notif_type notification_type)
+returns boolean as $$
+declare
+  settings user_settings%rowtype;
+begin
+  select * into settings from user_settings where id = user_id;
+
+  if not found then
+    return true; -- Default to notify if no settings
+  end if;
+
+  case notif_type
+    when 'friend_request' then return settings.notify_friend_requests;
+    when 'friend_accepted' then return settings.notify_friend_accepted;
+    when 'recipe_shared' then return settings.notify_recipe_shared;
+    when 'list_shared' then return settings.notify_list_shared;
+    when 'new_follower' then return settings.notify_new_follower;
+    else return true;
+  end case;
+end;
+$$ language plpgsql security definer stable;
+
+-- Notify on friend request
+create or replace function notify_friend_request()
+returns trigger as $$
+declare
+  requester_name text;
+begin
+  if not should_notify(new.addressee_id, 'friend_request') then
+    return new;
+  end if;
+
+  select display_name into requester_name from profiles where id = new.requester_id;
+
+  insert into notifications (user_id, type, title, body, data)
+  values (
+    new.addressee_id,
+    'friend_request',
+    'Friend Request',
+    '@' || (select username from profiles where id = new.requester_id) || ' wants to be your friend',
+    jsonb_build_object('friendship_id', new.id, 'requester_id', new.requester_id)
+  );
+
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger on_friend_request_created
+  after insert on friendships
+  for each row
+  when (new.status = 'pending')
+  execute function notify_friend_request();
+
+-- Notify on friend request accepted
+create or replace function notify_friend_accepted()
+returns trigger as $$
+begin
+  if old.status = 'pending' and new.status = 'accepted' then
+    if not should_notify(new.requester_id, 'friend_accepted') then
+      return new;
+    end if;
+
+    insert into notifications (user_id, type, title, body, data)
+    values (
+      new.requester_id,
+      'friend_accepted',
+      'Friend Request Accepted',
+      '@' || (select username from profiles where id = new.addressee_id) || ' accepted your friend request',
+      jsonb_build_object('friendship_id', new.id, 'friend_id', new.addressee_id)
+    );
+  end if;
+
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger on_friend_request_accepted
+  after update on friendships
+  for each row execute function notify_friend_accepted();
+
+-- Notify on recipe shared
+create or replace function notify_recipe_shared()
+returns trigger as $$
+declare
+  recipe_title text;
+begin
+  if not should_notify(new.recipient_id, 'recipe_shared') then
+    return new;
+  end if;
+
+  select title into recipe_title from recipes where id = new.recipe_id;
+
+  insert into notifications (user_id, type, title, body, data)
+  values (
+    new.recipient_id,
+    'recipe_shared',
+    'Recipe Shared',
+    '@' || (select username from profiles where id = new.sender_id) || ' shared a recipe with you: ' || recipe_title,
+    jsonb_build_object('shared_recipe_id', new.id, 'recipe_id', new.recipe_id, 'sender_id', new.sender_id)
+  );
+
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger on_recipe_shared
+  after insert on shared_recipes
+  for each row execute function notify_recipe_shared();
+
+-- Notify on grocery list shared (collaborator added)
+create or replace function notify_list_shared()
+returns trigger as $$
+declare
+  list_name text;
+  owner_id uuid;
+begin
+  if not should_notify(new.user_id, 'list_shared') then
+    return new;
+  end if;
+
+  select gl.name, gl.owner_id into list_name, owner_id
+  from grocery_lists gl where gl.id = new.list_id;
+
+  insert into notifications (user_id, type, title, body, data)
+  values (
+    new.user_id,
+    'list_shared',
+    'Grocery List Shared',
+    '@' || (select username from profiles where id = owner_id) || ' shared a grocery list with you: ' || list_name,
+    jsonb_build_object('list_id', new.list_id, 'owner_id', owner_id)
+  );
+
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger on_list_collaborator_added
+  after insert on grocery_list_collaborators
+  for each row execute function notify_list_shared();
+
+-- Notify on new follower
+create or replace function notify_new_follower()
+returns trigger as $$
+begin
+  if not should_notify(new.followee_id, 'new_follower') then
+    return new;
+  end if;
+
+  insert into notifications (user_id, type, title, body, data)
+  values (
+    new.followee_id,
+    'new_follower',
+    'New Follower',
+    '@' || (select username from profiles where id = new.follower_id) || ' started following you',
+    jsonb_build_object('follower_id', new.follower_id)
+  );
+
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger on_new_follower
+  after insert on follows
+  for each row execute function notify_new_follower();
+
 -- ============================================
 -- ROW LEVEL SECURITY POLICIES
 -- ============================================
 
 alter table profiles enable row level security;
+alter table user_settings enable row level security;
 alter table follows enable row level security;
 alter table friendships enable row level security;
 alter table recipes enable row level security;
@@ -509,6 +721,13 @@ create policy "Public profiles are viewable by everyone"
 
 create policy "Users can update own profile"
   on profiles for update using (auth.uid() = id);
+
+-- USER_SETTINGS policies
+create policy "Users can view own settings"
+  on user_settings for select using (auth.uid() = id);
+
+create policy "Users can update own settings"
+  on user_settings for update using (auth.uid() = id);
 
 -- FOLLOWS policies
 create policy "Follows are viewable by everyone"
@@ -984,17 +1203,17 @@ recipe-app/
 │   │   ├── index.tsx             # Home/Recipe collection
 │   │   ├── discover.tsx          # Public recipe browsing
 │   │   ├── meal-plan.tsx         # Weekly meal planning
-│   │   ├── grocery.tsx           # Grocery lists
-│   │   └── profile.tsx           # User profile
+│   │   ├── grocery.tsx           # Grocery lists overview
+│   │   └── profile.tsx           # User profile (modals for sub-screens)
 │   ├── recipe/
 │   │   ├── [id].tsx              # Recipe detail
 │   │   ├── create.tsx            # Create recipe
 │   │   ├── edit/[id].tsx         # Edit recipe
 │   │   └── cook/[id].tsx         # Cook mode
+│   ├── grocery/
+│   │   └── [id].tsx              # Grocery list detail
 │   ├── user/
 │   │   └── [username].tsx        # Public user profile
-│   ├── list/
-│   │   └── [id].tsx              # Grocery list detail
 │   ├── _layout.tsx               # Root layout
 │   └── index.tsx                 # Entry point / splash
 │
@@ -1019,11 +1238,17 @@ recipe-app/
 │   │   ├── GroceryListCard.tsx
 │   │   ├── GroceryItem.tsx
 │   │   └── CategoryGroup.tsx
-│   └── social/
-│       ├── UserCard.tsx
-│       ├── FriendsList.tsx
-│       ├── FollowersList.tsx
-│       └── ShareModal.tsx
+│   ├── social/
+│   │   ├── UserCard.tsx
+│   │   ├── FriendsList.tsx
+│   │   ├── FollowersList.tsx
+│   │   └── ShareModal.tsx
+│   └── profile/                  # Profile modal screens
+│       ├── FriendsModal.tsx
+│       ├── FollowersModal.tsx
+│       ├── NotificationsModal.tsx
+│       ├── SharedWithMeModal.tsx
+│       └── SettingsModal.tsx
 │
 ├── hooks/
 │   ├── useAuth.ts
@@ -1032,6 +1257,7 @@ recipe-app/
 │   ├── useGroceryLists.ts
 │   ├── useFriends.ts
 │   ├── useNotifications.ts
+│   ├── useSettings.ts
 │   └── useRealtimeSubscription.ts
 │
 ├── lib/
